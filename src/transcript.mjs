@@ -106,11 +106,15 @@ export function parseLine(line) {
 function* parseRecord(rec) {
   const msg = rec?.message;
   if (rec?.type === "assistant" && Array.isArray(msg?.content)) {
+    // stop_reason "end_turn" → the agent finished and is awaiting input; "tool_use"
+    // → it's mid-work and will continue after the result. Lets the conductor tell
+    // "done, waiting for you" from "still working" instead of guessing.
+    const stopReason = msg.stop_reason || null;
     for (const block of msg.content) {
       if (block.type === "thinking" && block.thinking) {
         yield { kind: "thinking", text: block.thinking, ts: rec.timestamp };
       } else if (block.type === "text" && block.text?.trim()) {
-        yield { kind: "assistant_say", text: block.text, ts: rec.timestamp };
+        yield { kind: "assistant_say", text: block.text, ts: rec.timestamp, stopReason };
       } else if (block.type === "tool_use") {
         yield {
           kind: "tool_use",

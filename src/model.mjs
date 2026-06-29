@@ -51,7 +51,10 @@ export function renderLog(events) {
         case "thinking":
           return `[thinking] ${trunc(e.text, 700)}`;
         case "assistant_say":
-          return `[agent→user] ${trunc(e.text, 300)}`;
+          // The agent's message TO THE USER is the prime thing we translate — give it
+          // real headroom. Clipping it to a sentence made the narrator think a long
+          // explanation was still mid-generation ("let me see the full breakdown…").
+          return `[agent→user] ${trunc(e.text, 2000)}`;
         case "user_say":
           return `[user→agent] ${trunc(e.text, 300)}`;
         case "tool_use":

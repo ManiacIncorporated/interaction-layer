@@ -80,6 +80,7 @@ export class WatchedAgent {
     this.startedAt = 0;
     this.lastEventAt = 0;
     this.stallFlagged = false; // fire the stall notice once per idle stretch
+    this.awaitingInput = false; // agent's last turn ended (end_turn) → done, waiting for you
     this.m = { tools: 0, edits: 0, bash: 0, tests: 0, errors: 0, consecErrors: 0 };
     this.editsByFile = new Map(); // file -> edit count (churn signal)
     this.goal = null; // original task (transcript HEAD) — persistent, never windowed
@@ -118,6 +119,10 @@ export class WatchedAgent {
         this.m.consecErrors++;
       } else this.m.consecErrors = 0;
     }
+    // Track whether the agent's turn ENDED (awaiting your input) vs is mid-work, so
+    // the stall note can say "done, waiting for you" instead of guessing "thinking".
+    if (ev.kind === "assistant_say") this.awaitingInput = ev.stopReason === "end_turn";
+    else if (ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "user_say") this.awaitingInput = false;
   }
 
   // Compact AMBIENT metrics line for the [FEED] payload — only notable bits, and
@@ -186,7 +191,11 @@ export class WatchedAgent {
     const mins = Math.round(idle / 60000);
     this.pending.push({
       kind: "meta",
-      text: `No new activity for about ${mins} minute${mins === 1 ? "" : "s"} — it may be stuck, on a long-running step, waiting on input, or finished.`,
+      // Deterministic: if the last turn ended (end_turn), it's DONE and waiting for
+      // you — say that, don't guess "still thinking". Otherwise it's quiet mid-work.
+      text: this.awaitingInput
+        ? `The agent finished its turn about ${mins} minute${mins === 1 ? "" : "s"} ago and is waiting for your input — it is NOT still working.`
+        : `No new activity for about ${mins} minute${mins === 1 ? "" : "s"} — it may be stuck, on a long-running step, or finished.`,
     });
     this.evCount++;
     this.scheduleNarrate();
