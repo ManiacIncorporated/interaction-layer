@@ -136,6 +136,11 @@ function stripTrailingMarkers(t) {
 import os from "node:os";
 
 const MODEL = process.env.IL_MODEL || "claude-haiku-4-5";
+// Output ceiling. Narration is one short line (bounded by the prompt), but a relayed
+// PROMPT — the research-backed expansion with file refs, a guardrail, and a verify
+// step — runs longer; 200 truncated those mid-sentence and sent the partial. 600
+// gives the relay ample headroom without making narration verbose.
+const MAX_TOKENS = Number(process.env.IL_MAX_TOKENS) || 600;
 
 // Combine an external abort signal with a hard timeout, so generation can be
 // cancelled by barge-in/supersede AND never hangs forever.
@@ -168,7 +173,7 @@ async function respondApi(messages, { signal } = {}) {
   const r = await client.messages.create(
     {
       model: MODEL,
-      max_tokens: 200,
+      max_tokens: MAX_TOKENS,
       // Cache the (stable) system prompt; the growing convo prefix is reused by
       // the server's prefix cache where available.
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -188,7 +193,7 @@ async function respondBaseten(messages, { signal } = {}) {
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model: process.env.IL_BASETEN_MODEL || "zai-org/GLM-5.2",
-      max_tokens: 200,
+      max_tokens: MAX_TOKENS,
       messages: [{ role: "system", content: SYSTEM }, ...messages],
     }),
     signal: withTimeout(signal, 20000),
@@ -242,7 +247,7 @@ async function* streamBaseten(messages, { signal } = {}) {
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model: process.env.IL_BASETEN_MODEL || "zai-org/GLM-5.2",
-      max_tokens: 200,
+      max_tokens: MAX_TOKENS,
       stream: true,
       messages: [{ role: "system", content: SYSTEM }, ...messages],
     }),
@@ -273,7 +278,7 @@ async function* streamApi(messages, { signal } = {}) {
   const stream = client.messages.stream(
     {
       model: MODEL,
-      max_tokens: 200,
+      max_tokens: MAX_TOKENS,
       system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
       messages,
     },
