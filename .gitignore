@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+# compiled Swift artifacts — built with `npm run build`
+bin/ptt-monitor
+bin/audio-stream
+bin/nowplaying-monitor.app
+# secrets / local config
+.env
+.env.*
+.claude/settings.local.json
+# misc
+.DS_Store
+*.log
+# scratch / scratch test harnesses
+._*
+/tmp/

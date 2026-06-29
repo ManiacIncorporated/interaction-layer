@@ -1,0 +1,7 @@
+{
+  "name": "interaction-layer",
+  "description": "Voice awareness sidecar that narrates and converses about your Claude Code session in real time",
+  "version": "0.1.0",
+  "author": { "name": "Maniac Incorporated" },
+  "license": "Apache-2.0"
+}

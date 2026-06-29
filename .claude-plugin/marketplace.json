@@ -1,0 +1,13 @@
+{
+  "name": "interaction-layer",
+  "owner": { "name": "Maniac Incorporated" },
+  "description": "Voice awareness sidecar(s) for Claude Code — a peer-engineer voice that narrates the agent's reasoning as it works",
+  "plugins": [
+    {
+      "name": "interaction-layer",
+      "source": "./",
+      "description": "Voice awareness sidecar that narrates and converses about your Claude Code session in real time",
+      "version": "0.1.0"
+    }
+  ]
+}

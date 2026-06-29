@@ -1,0 +1,29 @@
+{
+  "name": "interaction-layer",
+  "version": "0.1.0",
+  "description": "Voice awareness sidecar for Claude Code",
+  "bin": {
+    "interaction-layer": "bin/interaction-layer.mjs"
+  },
+  "scripts": {
+    "start": "node bin/interaction-layer.mjs",
+    "build": "swiftc -O bin/ptt-monitor.swift -o bin/ptt-monitor && swiftc -O bin/audio-stream.swift -o bin/audio-stream && bash bin/build-nowplaying.sh",
+    "calibrate": "node bin/mic-calibrate.mjs"
+  },
+  "keywords": [
+    "claude-code",
+    "voice",
+    "interaction-model"
+  ],
+  "author": "Maniac Incorporated",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ManiacIncorporated/interaction-layer.git"
+  },
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.191",
+    "@anthropic-ai/sdk": "^0.106.0"
+  }
+}
