@@ -332,7 +332,10 @@ async function resolveTarget(q) {
   const u = norm(q);
   const named = list.filter((a) => a.label && norm(a.label).length >= 3 && u.includes(norm(a.label)));
   if (named.length === 1) return named[0];
-  const roster = list.map((a) => ({ label: a.label, gist: a.gist() }));
+  // Include each agent's GOAL (its domain), not just the latest activity — so a
+  // topic-specific question routes by what the agent is fundamentally working on,
+  // even when its most recent action is generic.
+  const roster = list.map((a) => ({ label: a.label, goal: a.goal || "", gist: a.gist() }));
   const focusLabel = focused && agents.has(focused.slug) ? focused.label : null;
   let res;
   try {

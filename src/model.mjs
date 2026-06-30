@@ -384,19 +384,19 @@ export class InteractionModel {
   // work is about quantization). Returns the chosen label, or "STAY" (a follow-up
   // about the current focus), or "ASK" (genuinely ambiguous — caller should ask).
   async resolveAgent(utterance, roster, focusLabel) {
-    const list = roster.map((r) => `- ${r.label}: ${r.gist}`).join("\n");
+    const list = roster
+      .map((r) => `- ${r.label}${r.goal ? ` — working on: ${trunc(r.goal, 160)}` : ""}\n    (latest: ${r.gist})`)
+      .join("\n");
     const msg =
-      `Several coding agents are being watched. Here's the latest each was doing:\n${list}\n\n` +
-      (focusLabel ? `The user is currently focused on: ${focusLabel}\n\n` : "") +
+      `Several coding agents are being watched. Here's what each is working on:\n${list}\n\n` +
+      (focusLabel ? `Current focus (the agent last discussed): ${focusLabel}\n\n` : "") +
       `The user just said: "${utterance}"\n\n` +
-      `Which agent are they talking about? Match on topic/content, not just the name — ` +
-      `e.g. "the quantization agent" means whichever project's work is about quantization. ` +
+      `Which agent are they talking about? Match on TOPIC/DOMAIN: pick the agent whose work — its goal OR its latest activity — is about what they're asking. Do this EVEN IF they don't name an agent, and EVEN IF it's not the current focus. A deep/technical question about a specific project's subject belongs to THAT project, not to whoever happens to be in focus (e.g. a question about quantization/experts/water-filling belongs to the compression agent even if another agent is focused).\n` +
       `Reply with EXACTLY one of:\n` +
-      `- the agent's label (copy it verbatim) if they single out a specific one\n` +
-      `- STAY if they don't single out a different agent — a follow-up about the current focus, ` +
-      `OR a generic question that names no agent at all ("what's the status?")\n` +
-      `- ASK only if they clearly DO mean a specific agent but it's unclear which one (their words fit two or more)\n` +
-      `- NONE if they clearly name a specific agent that is NOT in the list above\n` +
+      `- the agent's label (copy it verbatim) — when the topic matches one agent's work\n` +
+      `- STAY — ONLY for a genuinely generic question with no domain signal ("what's the status?", "how's it going?", "is it done yet?"), or a clear follow-up to the current focus. Do NOT use STAY just because no agent was named — if the topic clearly matches one agent, pick that agent.\n` +
+      `- ASK — when the topic genuinely fits two or more agents and you can't tell which\n` +
+      `- NONE — when they clearly name/describe an agent that is NOT in the list above\n` +
       `Reply with only the label, STAY, ASK, or NONE — nothing else.`;
     const out = (await this._send(msg)).trim().replace(/^["'`]|["'`.]$/g, "");
     const hit = roster.find((r) => r.label.toLowerCase() === out.toLowerCase());
