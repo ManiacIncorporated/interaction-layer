@@ -43,8 +43,12 @@ function shq(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
 }
 
+// Codex's autonomous-but-sandboxed equivalent of claude's acceptEdits: never block
+// on per-command approval, but confine writes to the workspace. Override via env.
+const CODEX_SPAWN_ARGS = process.env.IL_CODEX_SPAWN_ARGS || "-a never -s workspace-write";
+
 // Spawn an agent. Returns { ok, dir, branch, isolated } or { ok:false, error }.
-export function spawnAgent({ task, cwd, stamp }) {
+export function spawnAgent({ task, cwd, stamp, source = "claude" }) {
   const t = String(task || "").trim();
   if (!t) return { ok: false, error: "no task given" };
 
@@ -75,11 +79,13 @@ export function spawnAgent({ task, cwd, stamp }) {
     }
   }
 
-  // Launch `claude` seeded with the task in a new Terminal window. Only the
+  // Launch the agent seeded with the task in a new Terminal window. Only the
   // (sanitized) paths are interpolated; the task is read from the file at runtime.
-  const cmd =
-    `cd ${shq(workdir)} && claude --permission-mode ${shq(PERMISSION_MODE)} ` +
-    `"$(cat ${shq(taskFile)})"`;
+  const launch =
+    source === "codex"
+      ? `codex ${CODEX_SPAWN_ARGS} "$(cat ${shq(taskFile)})"`
+      : `claude --permission-mode ${shq(PERMISSION_MODE)} "$(cat ${shq(taskFile)})"`;
+  const cmd = `cd ${shq(workdir)} && ${launch}`;
   // IL_SPAWN_DRYRUN: do everything except open the window (returns the command).
   if (process.env.IL_SPAWN_DRYRUN) {
     return { ok: true, dir: workdir, branch, isolated: !!root, cmd, taskFile, dryrun: true };

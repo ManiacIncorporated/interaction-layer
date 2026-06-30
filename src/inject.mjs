@@ -110,32 +110,32 @@ function findSurfaceRefByTty(tty, tree) {
 
 // All ttys of claude processes whose cwd is the project (there can be several —
 // the cmux pane plus sub-processes; only the pane's tty is a real cmux surface).
-function findClaudeTtys(cwd) {
+function findClaudeTtys(cwd, proc = "claude") {
   const script = `
-    for pid in $(pgrep -f claude); do
+    for pid in $(pgrep -f "$2"); do
       cmd=$(ps -o command= -p "$pid" 2>/dev/null)
-      case "$cmd" in *interaction-layer*|*ptt-monitor*) continue;; esac
+      case "$cmd" in *interaction-layer*|*ptt-monitor*|*nowplaying-monitor*) continue;; esac
       pcwd=$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
       if [ "$pcwd" = "$1" ]; then
         t=$(ps -o tty= -p "$pid" | tr -d ' ')
-        [ -n "$t" ] && echo "$t"
+        [ -n "$t" ] && [ "$t" != "??" ] && echo "$t"
       fi
     done`;
   try {
-    return execFileSync("bash", ["-c", script, "_", cwd], { encoding: "utf8" })
+    return execFileSync("bash", ["-c", script, "_", cwd, proc], { encoding: "utf8" })
       .split("\n").map((s) => s.trim()).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-async function sendViaCmux(text, cwd) {
+async function sendViaCmux(text, cwd, proc = "claude") {
   const tree = cmuxTree();
   if (!tree) return null; // socket unreachable / not installed
-  // Pick the claude tty that's actually a cmux surface (disambiguates when several
-  // claude processes share the cwd).
+  // Pick the agent tty that's actually a cmux surface (disambiguates when several
+  // processes share the cwd).
   let ref = null;
-  for (const tty of findClaudeTtys(cwd)) {
+  for (const tty of findClaudeTtys(cwd, proc)) {
     ref = findSurfaceRefByTty(tty, tree);
     if (ref) break;
   }
@@ -159,20 +159,20 @@ async function sendViaCmux(text, cwd) {
 }
 
 // ---------- Terminal.app ----------
-export function findClaudeTty(cwd) {
+export function findClaudeTty(cwd, proc = "claude") {
   const script = `
-    for pid in $(pgrep -f claude); do
+    for pid in $(pgrep -f "$2"); do
       cmd=$(ps -o command= -p "$pid" 2>/dev/null)
-      case "$cmd" in *interaction-layer*|*ptt-monitor*) continue;; esac
+      case "$cmd" in *interaction-layer*|*ptt-monitor*|*nowplaying-monitor*) continue;; esac
       pcwd=$(lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
       if [ "$pcwd" = "$1" ]; then
         t=$(ps -o tty= -p "$pid" | tr -d ' ')
-        [ -n "$t" ] && echo "/dev/$t" && exit 0
+        [ -n "$t" ] && [ "$t" != "??" ] && echo "/dev/$t" && exit 0
       fi
     done
     exit 1`;
   try {
-    return execFileSync("bash", ["-c", script, "_", cwd], { encoding: "utf8" }).trim() || null;
+    return execFileSync("bash", ["-c", script, "_", cwd, proc], { encoding: "utf8" }).trim() || null;
   } catch {
     return null;
   }
@@ -205,9 +205,9 @@ on run argv
   return "NOTFOUND"
 end run`;
 
-function sendViaTerminal(text, cwd) {
+function sendViaTerminal(text, cwd, proc = "claude") {
   return new Promise((resolve) => {
-    const tty = findClaudeTty(cwd);
+    const tty = findClaudeTty(cwd, proc);
     if (!tty) return resolve("NOTTY");
     execFile("osascript", ["-e", OSA, tty, text], (err, stdout) => {
       if (err) return resolve("ERROR:" + (err.message || "").split("\n")[0]);
@@ -218,15 +218,16 @@ function sendViaTerminal(text, cwd) {
 
 // Try cmux first (clean socket API), then Terminal.app keystrokes.
 // Returns "OK" | "NOTTY" | "NOTFOUND" | "CMUXAUTH" | "ERROR:<msg>".
-export async function sendToClaude(text, cwd) {
+export async function sendToClaude(text, cwd, source = "claude") {
+  const proc = source === "codex" ? "codex" : "claude";
   let cmuxUnreachable = false;
   if (CMUX) {
-    const r = await sendViaCmux(text, cwd);
+    const r = await sendViaCmux(text, cwd, proc);
     if (r === "OK") return "OK";
     if (r === null) cmuxUnreachable = true; // socket/auth failure (not just "no matching pane")
     // r === "NOSURFACE" (cmux reachable but no matching surface) → try Terminal.app.
   }
-  const t = await sendViaTerminal(text, cwd);
+  const t = await sendViaTerminal(text, cwd, proc);
   if (t === "OK") return "OK";
   // Both failed. If cmux is installed but we couldn't reach its socket, that's the
   // actionable cause (external socket control disabled / no password) — surface it.

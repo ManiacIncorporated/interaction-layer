@@ -5,8 +5,9 @@ A voice "awareness" sidecar for Claude Code, inspired by Thinking Machines'
 
 It adapts the **two-tier pattern** from that work:
 
-- **Background model** — your existing Claude Code coding agent. Unchanged. It
-  emits a live trace (thinking, tool calls, edits, results).
+- **Background model** — your existing coding agent. **Claude Code or Codex**
+  (auto-detected, and it can watch both at once). Unchanged. It emits a live
+  trace (thinking, tool calls, edits, results) that the sidecar reads from disk.
 - **Interaction model** — a lightweight, always-present layer (this tool) that
   observes that trace, narrates it aloud, and answers your questions about what
   the agent is doing and *why* — in real time, while it keeps working.

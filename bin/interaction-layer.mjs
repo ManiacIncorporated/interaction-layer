@@ -191,14 +191,17 @@ function maybeAutoResearch(ag, question) {
   runResearch(ag, question, { auto: true });
 }
 
-function labelFor(cwd) {
-  return MULTI ? cwd.split("/").filter(Boolean).pop() || cwd : "";
+function labelFor(cwd, source = "claude") {
+  if (!MULTI) return "";
+  const base = cwd.split("/").filter(Boolean).pop() || cwd;
+  // Disambiguate when a Codex and a Claude session share a directory.
+  return source === "codex" ? `${base} codex` : base;
 }
 
-function addAgent({ slug, cwd, file, stale }) {
+function addAgent({ slug, cwd, file, stale, source = "claude" }) {
   let ag = agents.get(slug);
   if (!ag) {
-    ag = new WatchedAgent({ slug, cwd, label: labelFor(cwd), voice, model, ctx });
+    ag = new WatchedAgent({ slug, cwd, label: labelFor(cwd, source), voice, model, ctx, source });
     agents.set(slug, ag);
   }
   ag.attach(file, { stale });
@@ -503,7 +506,7 @@ async function answer(q, forcedAgent = null) {
       const task = route.text;
       const root = repoRootOf(ag.cwd);
       const repoName = (root || ag.cwd).split("/").filter(Boolean).pop();
-      pendingSpawn = { task, cwd: ag.cwd };
+      pendingSpawn = { task, cwd: ag.cwd, source: ag.source };
       ag.commit(candidate, `(you asked me to spawn a new agent in ${repoName} to: ${task})`);
       ctx.onSpoke(ag);
       const where = root ? `a fresh worktree off ${repoName}` : `${repoName} — heads up, it's not a git repo so no isolation`;
@@ -514,7 +517,7 @@ async function answer(q, forcedAgent = null) {
 
     if (route.action === "prompt") {
       console.log(`\n➡️  ${ag.label ? `[${ag.label}] ` : ""}Claude: ${route.text}`);
-      const r = await sendToClaude(route.text, ag.cwd);
+      const r = await sendToClaude(route.text, ag.cwd, ag.source);
       if (mySeq !== turnSeq) return;
       // Record the relay as a plain first-person past-tense statement (not the raw
       // PROMPT: control token, which the model would mimic; and not a tentative
@@ -669,8 +672,8 @@ function offerGuardrail(ag, route) {
 
 // Actually create the worktree + launch the agent (after spoken confirmation). The
 // MultiWatcher discovers the new session on its own and starts narrating it.
-function doSpawn({ task, cwd }) {
-  const r = spawnAgent({ task, cwd, stamp: Date.now() });
+function doSpawn({ task, cwd, source = "claude" }) {
+  const r = spawnAgent({ task, cwd, stamp: Date.now(), source });
   if (r.ok) {
     console.log(`\n🚀 spawned: ${r.dir}${r.branch ? `  (branch ${r.branch})` : ""}`);
     const where = r.isolated ? `on a new branch, ${r.branch}` : "in its folder";

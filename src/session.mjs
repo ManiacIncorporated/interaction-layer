@@ -14,6 +14,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { slugFor, projectDirFor, latestTranscript, activeTranscripts } from "./transcript.mjs";
+import { activeCodexSessions, codexRunning } from "./sources/codex.mjs";
 
 export const POINTER_DIR = path.join(os.homedir(), ".claude", "interaction-layer");
 const FRESH_MS = 45_000; // a transcript touched this recently counts as "live"
@@ -139,6 +140,14 @@ export class SessionWatcher extends EventEmitter {
 //   "remove" {slug, cwd}              — session ended / disappeared (stop following)
 const STALE_MS = 5 * 60_000; // a transcript untouched this long, with no claude alive, is dead
 
+// Codex spawns many non-project sessions (desktop, computer-use, automations) in
+// the home dir or temp dirs — don't auto-watch those, only real project work.
+const HOME = os.homedir();
+function isNoiseCwd(cwd) {
+  if (!cwd || cwd === HOME) return true;
+  return /^\/(tmp|private|var)\b/.test(cwd) || /\/var\/folders\//.test(cwd) || /il-research/.test(cwd);
+}
+
 // Is transcript `a` newer than `b`? (Missing/unreadable a => not newer.)
 function newer(a, b) {
   try {
@@ -189,8 +198,38 @@ export class MultiWatcher extends EventEmitter {
     for (const { file, cwd } of activeTranscripts(STALE_MS)) {
       const slug = slugFor(cwd);
       if (this.ignored.has(slug) || this.known.has(slug)) continue;
-      this.known.set(slug, { file, cwd, viaPointer: false });
-      this.emit("add", { slug, cwd, file, stale: false });
+      this.known.set(slug, { file, cwd, viaPointer: false, source: "claude" });
+      this.emit("add", { slug, cwd, file, stale: false, source: "claude" });
+    }
+    this.scanCodex();
+  }
+
+  // Codex sessions have no hook pointers (and may run in the desktop/VSCode app),
+  // so they're discovered purely by their rollout files — newest active one per cwd.
+  // Keyed "codex:<slug>" so a Codex and a Claude session in the same dir coexist.
+  scanCodex() {
+    const byCwd = new Map();
+    for (const s of activeCodexSessions(STALE_MS)) {
+      if (isNoiseCwd(s.cwd)) continue; // skip home/tmp/background codex sessions
+      let m = 0;
+      try {
+        m = fs.statSync(s.file).mtimeMs;
+      } catch {}
+      const prev = byCwd.get(s.cwd);
+      if (!prev || m > prev.m) byCwd.set(s.cwd, { ...s, m });
+    }
+    for (const { file, cwd } of byCwd.values()) {
+      const slug = slugFor(cwd);
+      if (this.ignored.has(slug)) continue;
+      const key = "codex:" + slug;
+      const prev = this.known.get(key);
+      if (!prev) {
+        this.known.set(key, { file, cwd, viaPointer: false, source: "codex" });
+        this.emit("add", { slug: key, cwd, file, stale: false, source: "codex" });
+      } else if (prev.file !== file && newer(file, prev.file)) {
+        prev.file = file;
+        this.emit("switch", { slug: key, cwd, file, source: "codex" });
+      }
     }
   }
 
@@ -229,8 +268,8 @@ export class MultiWatcher extends EventEmitter {
       pointered.add(slug);
       const prev = this.known.get(slug);
       if (!prev) {
-        this.known.set(slug, { file: p.transcript_path, cwd: p.cwd, viaPointer: true });
-        this.emit("add", { slug, cwd: p.cwd, file: p.transcript_path, stale: !fresh });
+        this.known.set(slug, { file: p.transcript_path, cwd: p.cwd, viaPointer: true, source: "claude" });
+        this.emit("add", { slug, cwd: p.cwd, file: p.transcript_path, stale: !fresh, source: "claude" });
       } else {
         prev.viaPointer = true; // adopt a transcript-sourced agent that now has a pointer
         // Switch only to a genuinely NEWER transcript. A pointer can name an
@@ -238,30 +277,32 @@ export class MultiWatcher extends EventEmitter {
         // the live transcript first); don't switch back to the stale one.
         if (prev.file !== p.transcript_path && newer(p.transcript_path, prev.file)) {
           prev.file = p.transcript_path;
-          this.emit("switch", { slug, cwd: p.cwd, file: p.transcript_path });
+          this.emit("switch", { slug, cwd: p.cwd, file: p.transcript_path, source: "claude" });
         }
       }
     }
+    this.scanCodex(); // discover/refresh Codex sessions (keyed codex:<slug>)
     // Removals. Pointer-sourced agents drop when they leave the live pointer set
-    // (ended / stale-dead). Transcript-sourced agents (no pointer) have no such
-    // signal, so keep them until their transcript itself goes stale-dead.
+    // (ended / stale-dead). Transcript-sourced agents (no pointer — incl. all Codex)
+    // have no such signal, so keep them until their transcript itself goes stale-dead.
     for (const [slug, info] of [...this.known]) {
       if (pointered.has(slug)) continue;
-      let dead = !info.viaPointer ? this.transcriptDead(info.file) : true;
+      let dead = !info.viaPointer ? this.transcriptDead(info.file, info.source) : true;
       if (dead) {
         this.known.delete(slug);
-        this.emit("remove", { slug, cwd: info.cwd });
+        this.emit("remove", { slug, cwd: info.cwd, source: info.source });
       }
     }
   }
 
-  transcriptDead(file) {
+  transcriptDead(file, source = "claude") {
     try {
       if (Date.now() - fs.statSync(file).mtimeMs < STALE_MS) return false; // still active
     } catch {
       return true; // gone
     }
-    return !this.claudeRunning(); // stale: dead only if no claude is alive anywhere
+    // stale: dead only if no agent of that kind is alive anywhere
+    return source === "codex" ? !codexRunning() : !this.claudeRunning();
   }
 
   start() {

@@ -154,7 +154,7 @@ function* parseRecord(rec) {
 // ACTIVE work time. Active time sums the gaps between consecutive events but caps
 // each gap at `gapCapMs` — so a session parked for hours/overnight (or resumed
 // days later) counts the working stretches, not the wall-clock span.
-export function sessionTiming(file, gapCapMs = 300_000) {
+export function sessionTiming(file, gapCapMs = 300_000, parse = parseLine) {
   let goal = null;
   let startedAt = 0;
   let activeMs = 0;
@@ -176,7 +176,7 @@ export function sessionTiming(file, gapCapMs = 300_000) {
         lastTs = ts;
       }
       if (!goal) {
-        for (const ev of parseRecord(rec)) {
+        for (const ev of parse(line)) {
           if (ev.kind === "user_say" && isGoalLike(ev.text)) {
             goal = ev.text.trim();
             break;
@@ -202,17 +202,17 @@ function isGoalLike(text) {
 
 // Read the last `n` TraceEvents already in the file, so the sidecar has context
 // the moment it attaches (otherwise early questions see an empty buffer).
-export function seedEvents(file, n = 40) {
+export function seedEvents(file, n = 40, parse = parseLine) {
   const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
   const out = [];
-  for (const line of lines) out.push(...parseLine(line));
+  for (const line of lines) out.push(...parse(line));
   return out.slice(-n);
 }
 
 // Tail a file: emit "event" for each parsed TraceEvent on appended lines.
 // If fromStart is false (default) we skip existing content and only follow new
 // activity — the live experience.
-export function tail(file, { fromStart = false } = {}) {
+export function tail(file, { fromStart = false, parse = parseLine } = {}) {
   const em = new EventEmitter();
   let offset = fromStart ? 0 : fs.statSync(file).size;
   let buf = "";
@@ -241,13 +241,7 @@ export function tail(file, { fromStart = false } = {}) {
       buf = lines.pop() || ""; // keep partial (un-terminated) last line for later
       for (const line of lines) {
         if (!line.trim()) continue;
-        let rec;
-        try {
-          rec = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        for (const ev of parseRecord(rec)) em.emit("event", ev);
+        for (const ev of parse(line)) em.emit("event", ev);
       }
       reading = false;
       // More may have been appended while we were reading.

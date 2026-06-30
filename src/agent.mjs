@@ -7,7 +7,12 @@
 // Both single-project mode and multi mode drive THIS class — there is no second
 // narrate code path to keep in sync.
 import fs from "node:fs";
-import { tail, seedEvents, sessionTiming } from "./transcript.mjs";
+import { tail, seedEvents, sessionTiming, parseLine as parseClaude } from "./transcript.mjs";
+import { parseLine as parseCodex } from "./sources/codex.mjs";
+
+// Per-source line parser → shared TraceEvent model. The rest of this class is
+// source-agnostic (it only ever sees normalized events).
+const PARSERS = { claude: parseClaude, codex: parseCodex };
 import { narrateToolUse, narrateResult, narrateAssistantSay } from "./narrate.mjs";
 import { renderLog } from "./model.mjs";
 
@@ -49,13 +54,15 @@ function isSalient(ev) {
 export class WatchedAgent {
   // ctx (shared, from the orchestrator):
   //   narrateMs, speakActions, isConversing(), log(s), onSpoke(agent)
-  constructor({ slug, cwd, label, voice, model, ctx }) {
+  constructor({ slug, cwd, label, voice, model, ctx, source = "claude" }) {
     this.slug = slug;
     this.cwd = cwd;
     this.label = label || ""; // short project name for prefixing; "" = single mode
     this.voice = voice;
     this.model = model;
     this.ctx = ctx;
+    this.source = source; // "claude" | "codex" — which coding agent this session is
+    this.parse = PARSERS[source] || parseClaude;
 
     this.recent = []; // ring buffer of recent TraceEvents
     this.toolNames = new Map(); // tool_use id -> tool name, for result narration
@@ -121,7 +128,8 @@ export class WatchedAgent {
     }
     // Track whether the agent's turn ENDED (awaiting your input) vs is mid-work, so
     // the stall note can say "done, waiting for you" instead of guessing "thinking".
-    if (ev.kind === "assistant_say") this.awaitingInput = ev.stopReason === "end_turn";
+    if (ev.kind === "turn_end") this.awaitingInput = true; // Codex task_complete
+    else if (ev.kind === "assistant_say") this.awaitingInput = ev.stopReason === "end_turn";
     else if (ev.kind === "tool_use" || ev.kind === "tool_result" || ev.kind === "user_say") this.awaitingInput = false;
   }
 
@@ -228,12 +236,12 @@ export class WatchedAgent {
     // One-time HEAD read: the goal + true session start live at the start of the
     // transcript and are long gone from the tail window (esp. for sessions the
     // sidecar attached to mid-flight).
-    const ti = sessionTiming(file, ACTIVE_GAP_MS);
+    const ti = sessionTiming(file, ACTIVE_GAP_MS, this.parse);
     this.goal = ti.goal;
     this.sessionStartedAt = ti.startedAt || Date.now();
     this.activeMs = ti.activeMs;
     this._lastTs = ti.lastTs || this.sessionStartedAt;
-    for (const ev of seedEvents(file, MAX_RECENT)) {
+    for (const ev of seedEvents(file, MAX_RECENT, this.parse)) {
       this.recent.push(ev);
       if (ev.id) this.toolNames.set(ev.id, ev.tool);
     }
@@ -253,7 +261,7 @@ export class WatchedAgent {
     try {
       this.lastSpokeAt = fs.statSync(file).mtimeMs;
     } catch {}
-    this.t = tail(file);
+    this.t = tail(file, { parse: this.parse });
     this.t.on("event", (ev) => this.onEvent(ev));
     this.t.on("error", (e) => this.ctx.log(`tail error (${this.slug}): ${e.message}`));
   }
