@@ -152,11 +152,12 @@ function stripTrailingMarkers(t) {
 import os from "node:os";
 
 const MODEL = process.env.IL_MODEL || "claude-haiku-4-5";
-// Output ceiling. Narration is one short line (bounded by the prompt), but a relayed
-// PROMPT — the research-backed expansion with file refs, a guardrail, and a verify
-// step — runs longer; 200 truncated those mid-sentence and sent the partial. 600
-// gives the relay ample headroom without making narration verbose.
-const MAX_TOKENS = Number(process.env.IL_MAX_TOKENS) || 600;
+// Output ceiling. It's just a CAP (the prompt keeps narration to one line), so a
+// high value doesn't make replies verbose — it only prevents truncation. Crucially,
+// GLM-class reasoning models spend this same budget on their <think> reasoning
+// BEFORE the answer, so a tight cap gets eaten by reasoning and the answer is cut
+// off mid-sentence. 1500 leaves room for reasoning + a full relayed PROMPT/answer.
+const MAX_TOKENS = Number(process.env.IL_MAX_TOKENS) || 1500;
 
 // Combine an external abort signal with a hard timeout, so generation can be
 // cancelled by barge-in/supersede AND never hangs forever.
