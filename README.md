@@ -66,7 +66,12 @@ It attaches to the live session(s) (see below) and starts narrating. Then:
   sidecar tries to claim that slot (silent audio via the bundled helper) — but macOS 26
   often won't hand it over, so taps may not register. ⌥-hold is the dependable trigger.
 - **Or type a question + Enter** → spoken answer (works from any dictation tool too)
-- `/agents` `/focus <name>` `/research <topic>` `/guardrails` `/mute` `/unmute` `/quit`
+- `/agents` `/focus <name>` `/research <topic>` `/guardrails` `/memory` `/mute` `/unmute` `/quit`
+
+It also has **persistent memory per project**: across restarts it reloads the story
+so far and prior research findings (keyed by repo, so it survives new sessions and
+worktrees), and opens with a brief "picking back up on…" — while always deferring to
+the live transcript, so stale recall never overrides what's actually happening now.
 
 ### Watching multiple agents at once
 

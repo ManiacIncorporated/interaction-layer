@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import { tail, seedEvents, sessionTiming, parseLine as parseClaude } from "./transcript.mjs";
 import { parseLine as parseCodex } from "./sources/codex.mjs";
+import { loadMemory, saveMemory } from "./memory.mjs";
 
 // Per-source line parser → shared TraceEvent model. The rest of this class is
 // source-agnostic (it only ever sees normalized events).
@@ -98,6 +99,22 @@ export class WatchedAgent {
     this.research = []; // [{topic, brief}] grounded research briefs (recall)
     this.researchedTopics = []; // questions already researched/in-flight (model-judged dedup)
     this.bridgePending = false; // just answered a side question — bridge back next beat
+    this.crossSessionResume = false; // one-shot: prior-session memory was loaded; cue a recap
+    this._memLoaded = false; // load persisted memory only once (not on every switch)
+    this._persistTimer = null; // debounce disk writes
+  }
+
+  // Persist the conductor's long-horizon memory for this project (debounced).
+  persist() {
+    if (this._persistTimer) return;
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null;
+      saveMemory(this.cwd, { arc: this.arc, research: this.research, researchedTopics: this.researchedTopics });
+    }, 4000);
+  }
+  persistNow() {
+    if (this._persistTimer) clearTimeout(this._persistTimer), (this._persistTimer = null);
+    saveMemory(this.cwd, { arc: this.arc, research: this.research, researchedTopics: this.researchedTopics });
   }
 
   recordMetrics(ev) {
@@ -171,7 +188,9 @@ export class WatchedAgent {
   // (the convo already carries the recent ones, so don't double-send).
   storyLine() {
     const older = this.arc.slice(0, -CONVO_PAIRS).slice(-10);
-    return older.length ? `[STORY SO FAR]\n${older.map((l) => "· " + l).join("\n")}` : "";
+    return older.length
+      ? `[STORY SO FAR] (this + earlier sessions — for grounding, may be stale, don't recite or assert as current)\n${older.map((l) => "· " + l).join("\n")}`
+      : "";
   }
 
   researchedLine() {
@@ -244,6 +263,21 @@ export class WatchedAgent {
     for (const ev of seedEvents(file, MAX_RECENT, this.parse)) {
       this.recent.push(ev);
       if (ev.id) this.toolNames.set(ev.id, ev.tool);
+    }
+    // Cross-session memory: hydrate the long-horizon channels ONCE (not on every
+    // switch). These feed [STORY SO FAR] / [ALREADY RESEARCHED], which the model is
+    // told to use for grounding and NOT recite. The goal is NOT loaded — it's
+    // recomputed from this transcript above (session-local; persisting it risks
+    // asserting a stale objective).
+    if (!this._memLoaded) {
+      this._memLoaded = true;
+      const mem = loadMemory(this.cwd);
+      if (mem && (mem.arc.length || mem.research.length)) {
+        this.arc = mem.arc.slice(-30);
+        this.research = mem.research.slice(-20);
+        this.researchedTopics = [...new Set([...mem.researchedTopics, ...this.researchedTopics])].slice(-20);
+        this.crossSessionResume = true; // cue a past-tense "picking back up" on the next beat
+      }
     }
     const name = file.split("/").pop();
     if (switched) {
@@ -355,10 +389,18 @@ export class WatchedAgent {
     const header = this.ambientHeader();
     // One-shot bridge-back after a side conversation — model decides if it's worth a
     // "anyway, back to it"; if nothing notable happened it just continues normally.
-    const resume = this.bridgePending
+    let resume = this.bridgePending
       ? `[RESUMING] You just answered a brief side question from your teammate. If the agent did something worth mentioning while you were away, bridge back naturally ("anyway, back to it — …"); if nothing notable, just continue.\n`
       : "";
     this.bridgePending = false;
+    // One-shot cross-session resume: prior-session memory ([STORY SO FAR]/[ALREADY
+    // RESEARCHED]) was loaded. Let the model open with a brief PAST-TENSE recap, but
+    // it must defer to the live activity (the memory may be stale).
+    if (this.crossSessionResume) {
+      this.crossSessionResume = false;
+      resume +=
+        `[RESUMING] You've watched this project in earlier sessions — the [STORY SO FAR] and [ALREADY RESEARCHED] above are from then and MAY BE STALE. If it fits, open with one brief past-tense line ("picking back up on …, last time you were …"), but anchor on what's happening NOW and never assert a past decision as still current without seeing it in the live activity.\n`;
+    }
     const candidate = { role: "user", content: `${header ? header + "\n\n" : ""}${resume}[FEED]\n${renderLog(batch)}` };
     const ac = (this.genAbort = new AbortController());
     try {
@@ -385,6 +427,7 @@ export class WatchedAgent {
           this.commit(candidate, line); // commit the [FEED]→reply pair atomically
           this.arc.push(line); // long-horizon story (text-only, bounded)
           if (this.arc.length > 30) this.arc = this.arc.slice(-30);
+          this.persist(); // remember across sessions (debounced)
         }
         this.ctx.onSpoke(this); // focus follows what we just acted on
       }

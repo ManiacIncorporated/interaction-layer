@@ -24,6 +24,7 @@ import { sendToClaude } from "../src/inject.mjs";
 import { spawnAgent, repoRootOf } from "../src/spawn.mjs";
 import { research, newResearchDir } from "../src/research.mjs";
 import { addGuardrail, forgetGuardrail, listGuardrails, applicableGuardrails } from "../src/guardrails.mjs";
+import { loadMemory, forgetMemory, memoryKeyFor } from "../src/memory.mjs";
 import { InteractionModel, renderLog } from "../src/model.mjs";
 
 // Push-to-talk: hold Right Option (⌥) to talk. The mic only runs while held.
@@ -186,6 +187,7 @@ function maybeAutoResearch(ag, question) {
   }
   (ag._researchKeys ||= new Set()).add(key);
   ag.researchedTopics.push(question); // model-judged dedup context
+  ag.persist();
   researchInFlight = true;
   researchCount++;
   runResearch(ag, question, { auto: true });
@@ -256,7 +258,7 @@ console.log(
   `\nType or dictate a question + Enter. Any key hushes the narrator (barge-in); Esc just hushes.`
 );
 if (VOICE_IN) console.log(`Or hold Right Option (⌥) to push-to-talk — or tap an AirPod (play/pause) to toggle.`);
-console.log(`Commands: /agents  /focus <name>  /research <topic>  /guardrails  /mute  /unmute  /quit\n`);
+console.log(`Commands: /agents  /focus <name>  /research <topic>  /guardrails  /memory  /mute  /unmute  /quit\n`);
 
 // ---- session discovery ----
 let watcher;
@@ -631,6 +633,7 @@ function runResearch(ag, topic, { auto = false } = {}) {
       try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
       if (r.ok) {
         ag.research.push({ topic, brief: r.brief, notable: r.notable });
+        ag.persist(); // research is durable — remember it across sessions
         ag.commit({ role: "user", content: `[ME] (research result for: ${topic})` }, r.brief);
         console.log(`\n🔬 ${tag}research — ${topic} (notable: ${r.notable}):\n${r.brief}\n`);
         // Asymmetric delivery: on-request always speaks; AUTO speaks only when the
@@ -942,6 +945,24 @@ async function handleLine(raw) {
     if (!global.length && !project.length) console.log("     (none yet — they're learned from your corrections)");
     return;
   }
+  if (q.startsWith("/memory")) {
+    const rest = q.slice(7).trim();
+    const ag = targetAgent();
+    const cwd = ag?.cwd || singleCwd || process.cwd();
+    if (rest === "clear") {
+      forgetMemory(cwd);
+      if (ag) { ag.arc = []; ag.research = []; ag.researchedTopics = []; }
+      return console.log("   cleared this project's conductor memory");
+    }
+    const mem = loadMemory(cwd) || { arc: [], research: [], researchedTopics: [] };
+    console.log(`   conductor memory (${memoryKeyFor(cwd).split("/").pop()}):`);
+    console.log(`   story so far (${mem.arc.length}):`);
+    mem.arc.slice(-8).forEach((l) => console.log(`     · ${l}`));
+    console.log(`   research remembered (${mem.research.length}):`);
+    mem.research.slice(-6).forEach((r) => console.log(`     🔬 ${r.topic}`));
+    if (!mem.arc.length && !mem.research.length) console.log("     (nothing yet — builds up as it watches this project)");
+    return;
+  }
   await answer(q);
 }
 
@@ -984,6 +1005,7 @@ input.on("end", shutdown); // stdin closed (e.g. terminal closed)
 function shutdown() {
   watcher.stop();
   for (const ag of agents.values()) ag.close();
+  for (const ag of agents.values()) ag.persistNow?.(); // flush conductor memory to disk
   mic?.stop();
   pttProc?.kill();
   if (airpodPoll) clearInterval(airpodPoll);
