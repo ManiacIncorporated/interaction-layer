@@ -85,6 +85,18 @@ function trunc(s, n) {
 // reply with no markers at all has nothing private to leak, so it's spoken as-is.
 export function parseReply(out) {
   const s = (out || "").trim();
+  // Some backends (GLM and other reasoning models) emit native <think>…</think>
+  // reasoning and then the answer as BARE text, without our SAY: marker. Without
+  // this, the fail-safe below sees THINK-but-no-marker and discards the answer.
+  // Treat everything after the closing </think> as the spoken surface; the part
+  // before it is reasoning and is never spoken.
+  const close = s.toLowerCase().lastIndexOf("</think>");
+  if (close !== -1) {
+    const reasoning = s.slice(0, close).replace(/<\/?think>/gi, "").replace(/^\s*THINK:\s*/i, "").trim();
+    const surface = s.slice(close + "</think>".length).trim();
+    const r = _parseAction(surface);
+    return { ...r, think: r.think || reasoning, guardrail: guardrailOf(surface), unguardrail: unguardrailOf(surface) };
+  }
   // guardrail (learn) / unguardrail (revoke) are side-channels alongside the action.
   return { ..._parseAction(s), guardrail: guardrailOf(s), unguardrail: unguardrailOf(s) };
 }
