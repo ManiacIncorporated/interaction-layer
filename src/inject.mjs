@@ -10,6 +10,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { guiSend, APP_PROFILES } from "./gui-send.mjs";
+
 const LOG_DIR = path.join(os.homedir(), ".claude", "interaction-layer");
 function debug(name, data) {
   try {
@@ -229,6 +231,17 @@ export async function sendToClaude(text, cwd, source = "claude") {
   }
   const t = await sendViaTerminal(text, cwd, proc);
   if (t === "OK") return "OK";
+  // No terminal for this agent (it's the desktop/IDE app — Claude/Codex Desktop,
+  // VSCode). Best-effort GUI fallback: type into the app window whose title matches
+  // this project (AX title-guard refuses if no window matches → never wrong-window).
+  if (t === "NOTTY" && APP_PROFILES[source]) {
+    const hint = cwd.split("/").filter(Boolean).pop() || "";
+    const g = await guiSend(text, source, hint);
+    if (g === "OK") return "OK";
+    if (g === "NOMATCH") return "GUINOMATCH"; // app open but no window titled for this project
+    if (g === "NOAPP") return t; // app not running → fall through to the plain no-terminal message
+    // ERROR → report the terminal failure (more actionable)
+  }
   // Both failed. If cmux is installed but we couldn't reach its socket, that's the
   // actionable cause (external socket control disabled / no password) — surface it.
   if (cmuxUnreachable) return "CMUXAUTH";

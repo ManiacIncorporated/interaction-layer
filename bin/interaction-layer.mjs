@@ -542,8 +542,11 @@ async function answer(q, forcedAgent = null) {
             ? null
             : `Sent${MULTI ? ` to ${ag.label}` : ""}: ${route.text}`;
       } else if (r === "NOTTY") {
-        spoken = `I don't see Claude running in ${ag.cwd.split("/").pop()}. Run it there, in the same folder as me.`;
-        console.error(`   ⚠️  no claude process with cwd ${ag.cwd}`);
+        spoken = `I don't see ${who} running in ${ag.cwd.split("/").pop()} — no terminal or desktop window I could reach.`;
+        console.error(`   ⚠️  no ${ag.source} process/window for cwd ${ag.cwd}`);
+      } else if (r === "GUINOMATCH") {
+        spoken = `${who}'s app is open but I couldn't find the ${ag.cwd.split("/").pop()} window to type into — bring that project's window up and try again.`;
+        console.error(`   ⚠️  GUI send: no ${ag.source} window titled for ${ag.cwd}`);
       } else if (r === "CMUXAUTH") {
         spoken = "I can't reach cmux to steer it — I need its socket password. Drop it in the interaction-layer folder, then restart me.";
         console.error(
